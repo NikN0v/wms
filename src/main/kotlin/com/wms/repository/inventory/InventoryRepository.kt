@@ -38,4 +38,24 @@ interface InventoryRepository : JpaRepository<Inventory, Long> {
         @Param("productId") productId: Long,
         @Param("locationId") locationId: Long
     ): Optional<Inventory>
+
+    @Query(
+        """
+    SELECT i FROM Inventory i
+    JOIN FETCH i.product p
+    JOIN FETCH i.location l
+    JOIN FETCH l.zone z
+    WHERE i.tenantId = :tenantId
+      AND z.warehouse.id = :warehouseId
+      AND (:productId IS NULL OR p.id = :productId)
+      AND (:locationId IS NULL OR l.id = :locationId)
+    ORDER BY p.sku, l.code
+    """
+    )
+    fun findStockBalances(
+        @Param("tenantId") tenantId: Long,
+        @Param("warehouseId") warehouseId: Long,
+        @Param("productId") productId: Long?,
+        @Param("locationId") locationId: Long?
+    ): List<Inventory>
 }
