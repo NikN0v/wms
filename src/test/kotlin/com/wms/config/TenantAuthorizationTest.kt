@@ -11,6 +11,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import com.wms.service.warehouse.WarehouseAccessService
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -37,6 +38,9 @@ class TenantAuthorizationTest {
 
     @MockitoBean
     private lateinit var jwtDecoder: JwtDecoder
+
+    @MockitoBean
+    private lateinit var warehouseAccessService: WarehouseAccessService
 
     @Test
     fun `operator can read warehouse and run warehouse workflows`() {
@@ -165,6 +169,10 @@ class TenantAuthorizationTest {
     }
 
     private fun jwtAs(role: String, tenantId: Long) = jwt()
-        .jwt { token -> token.claim("tenantId", tenantId) }
+        .jwt { token ->
+            token.claim("tenantId", tenantId)
+            token.claim("userId", 100L)
+            token.claim("role", role)
+        }
         .authorities(SimpleGrantedAuthority("ROLE_$role"))
 }

@@ -18,6 +18,12 @@ interface InventoryRepository : JpaRepository<Inventory, Long> {
 
     fun findAllByTenantId(tenantId: Long): List<Inventory>
 
+    @Query("select i from Inventory i join i.location l join l.zone z where i.tenantId = :tenantId and z.warehouse.id in :warehouseIds")
+    fun findAllByTenantIdAndWarehouseIds(
+        @Param("tenantId") tenantId: Long,
+        @Param("warehouseIds") warehouseIds: Collection<Long>
+    ): List<Inventory>
+
     fun findByTenantIdAndProduct_IdAndLocation_Id(
         tenantId: Long,
         productId: Long,

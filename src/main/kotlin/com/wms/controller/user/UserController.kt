@@ -3,9 +3,11 @@ package com.wms.controller.user
 import com.wms.dto.user.RegisterUserRequest
 import com.wms.dto.user.ChangeUserRoleRequest
 import com.wms.dto.user.SetUserActiveRequest
+import com.wms.dto.user.SetUserWarehousesRequest
 import com.wms.dto.user.UserResponse
 import com.wms.entity.user.UserRole
 import com.wms.service.user.UserService
+import com.wms.service.warehouse.WarehouseAccessService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
@@ -15,7 +17,8 @@ import org.springframework.web.server.ResponseStatusException
 @RestController
 @RequestMapping("/api/tenants/{tenantId}/users")
 class UserController(
-    private val userService: UserService
+    private val userService: UserService,
+    private val warehouseAccessService: WarehouseAccessService
 ) {
 
     @PostMapping
@@ -51,6 +54,28 @@ class UserController(
     ): UserResponse {
         val (actorId, role) = actor(authentication)
         return userService.changeRole(tenantId, userId, actorId, role, requireNotNull(request.role))
+    }
+
+    @GetMapping("/{userId}/warehouses")
+    fun getAssignedWarehouses(
+        @PathVariable tenantId: Long,
+        @PathVariable userId: Long
+    ): List<Long> = warehouseAccessService.getAssignedWarehouseIds(tenantId, userId)
+
+    @PutMapping("/{userId}/warehouses")
+    fun setAssignedWarehouses(
+        @PathVariable tenantId: Long,
+        @PathVariable userId: Long,
+        @Valid @RequestBody request: SetUserWarehousesRequest,
+        authentication: JwtAuthenticationToken
+    ): List<Long> {
+        val (_, role) = actor(authentication)
+        return warehouseAccessService.replaceAssignments(
+            tenantId,
+            userId,
+            request.warehouseIds,
+            role
+        )
     }
 
     private fun actor(authentication: JwtAuthenticationToken): Pair<Long, UserRole> {

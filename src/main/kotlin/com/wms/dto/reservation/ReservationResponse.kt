@@ -11,6 +11,7 @@ data class ReservationResponse(
     val sku: String,
     val productName: String,
     val locationId: Long,
+    val warehouseId: Long,
     val quantity: BigDecimal,
     val status: ReservationStatus,
     val referenceType: String?,

@@ -12,6 +12,7 @@ data class InventoryMovementResponse(
     val productName: String,
     val locationId: Long,
     val locationCode: String,
+    val warehouseId: Long,
     val movementType: InventoryMovementType,
     val quantity: BigDecimal,
     val receivingDocumentId: Long?,

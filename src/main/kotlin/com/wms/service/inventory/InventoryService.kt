@@ -85,7 +85,7 @@ class InventoryService(
     }
 
     @Transactional(readOnly = true)
-    fun getAllByTenantId(tenantId: Long): List<InventoryResponse> {
+    fun getAllByTenantId(tenantId: Long, warehouseIds: Set<Long>? = null): List<InventoryResponse> {
         if (!tenantRepository.existsById(tenantId)) {
             throw ResponseStatusException(
                 HttpStatus.NOT_FOUND,
@@ -93,7 +93,11 @@ class InventoryService(
             )
         }
 
-        return inventoryRepository.findAllByTenantId(tenantId)
+        if (warehouseIds != null && warehouseIds.isEmpty()) return emptyList()
+        val inventory = if (warehouseIds == null) inventoryRepository.findAllByTenantId(tenantId)
+        else inventoryRepository.findAllByTenantIdAndWarehouseIds(tenantId, warehouseIds)
+
+        return inventory
             .map { it.toResponse() }
     }
 

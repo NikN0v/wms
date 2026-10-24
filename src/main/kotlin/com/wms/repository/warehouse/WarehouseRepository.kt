@@ -10,6 +10,8 @@ interface WarehouseRepository : JpaRepository<Warehouse, Long> {
 
     fun findAllByTenantId(tenantId: Long): List<Warehouse>
 
+    fun findAllByTenant_IdAndIdIn(tenantId: Long, ids: Collection<Long>): List<Warehouse>
+
     fun findByIdAndTenantId(
         id: Long,
         tenantId: Long

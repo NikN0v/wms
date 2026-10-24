@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
+import com.wms.security.wmsUserContext
+import com.wms.service.warehouse.WarehouseAccessService
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.HandlerInterceptor
 import org.springframework.web.servlet.HandlerMapping
@@ -14,7 +16,9 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
 @Component
-class TenantAccessInterceptor : HandlerInterceptor {
+class TenantAccessInterceptor(
+    private val warehouseAccessService: WarehouseAccessService
+) : HandlerInterceptor {
 
     override fun preHandle(
         request: HttpServletRequest,
@@ -41,18 +45,26 @@ class TenantAccessInterceptor : HandlerInterceptor {
                 "Не удалось определить компанию пользователя"
             )
 
-        val tokenTenantId = authentication.token.claims["tenantId"]
-            ?.toString()
-            ?.toLongOrNull()
-            ?: throw ResponseStatusException(
-                HttpStatus.FORBIDDEN,
-                "В токене отсутствует корректный ID компании"
-            )
+        val identity = authentication.wmsUserContext()
 
-        if (tenantId != tokenTenantId) {
+        if (tenantId != identity.tenantId) {
             throw ResponseStatusException(
                 HttpStatus.FORBIDDEN,
                 "Нет доступа к данным этой компании"
+            )
+        }
+
+        warehouseAccessService.validateActor(tenantId, identity.userId, identity.role)
+
+        val warehouseIdValue = pathVariables["warehouseId"]
+        if (warehouseIdValue != null) {
+            val warehouseId = warehouseIdValue.toString().toLongOrNull()
+                ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "Некорректный ID склада")
+            warehouseAccessService.requireAccess(
+                tenantId,
+                identity.userId,
+                identity.role,
+                warehouseId
             )
         }
 

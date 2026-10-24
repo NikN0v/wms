@@ -26,7 +26,8 @@ class ReservationService(
     @Transactional
     fun create(
         tenantId: Long,
-        request: CreateReservationRequest
+        request: CreateReservationRequest,
+        allowedWarehouseIds: Set<Long>? = null
     ): ReservationResponse {
         val product = productRepository.findById(request.productId)
             .orElseThrow {
@@ -63,6 +64,10 @@ class ReservationService(
                 HttpStatus.BAD_REQUEST,
                 "Ячейка не принадлежит компании"
             )
+        }
+
+        if (allowedWarehouseIds != null && location.zone.warehouse.id !in allowedWarehouseIds) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Нет доступа к этому складу")
         }
 
         if (!location.isActive) {
@@ -115,7 +120,8 @@ class ReservationService(
     @Transactional
     fun release(
         tenantId: Long,
-        reservationId: Long
+        reservationId: Long,
+        allowedWarehouseIds: Set<Long>? = null
     ): ReservationResponse {
         val reservation = reservationRepository
             .findForUpdate(reservationId, tenantId)
@@ -125,6 +131,8 @@ class ReservationService(
                     "Резерв не найден"
                 )
             }
+
+        requireReservationWarehouseAccess(tenantId, reservation.locationId, allowedWarehouseIds)
 
         if (reservation.status != ReservationStatus.ACTIVE) {
             throw ResponseStatusException(
@@ -166,15 +174,19 @@ class ReservationService(
     }
 
     @Transactional(readOnly = true)
-    fun getAll(tenantId: Long): List<ReservationResponse> =
-        reservationRepository
+    fun getAll(tenantId: Long, allowedWarehouseIds: Set<Long>? = null): List<ReservationResponse> {
+        if (allowedWarehouseIds != null && allowedWarehouseIds.isEmpty()) return emptyList()
+        val result = reservationRepository
             .findAllByTenantIdOrderByCreatedAtDesc(tenantId)
             .map(::toResponse)
+        return if (allowedWarehouseIds == null) result else result.filter { it.warehouseId in allowedWarehouseIds }
+    }
 
     @Transactional(readOnly = true)
     fun getById(
         tenantId: Long,
-        reservationId: Long
+        reservationId: Long,
+        allowedWarehouseIds: Set<Long>? = null
     ): ReservationResponse {
         val reservation = reservationRepository
             .findByIdAndTenantId(reservationId, tenantId)
@@ -185,7 +197,11 @@ class ReservationService(
                 )
             }
 
-        return toResponse(reservation)
+        val response = toResponse(reservation)
+        if (allowedWarehouseIds != null && response.warehouseId !in allowedWarehouseIds) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Нет доступа к этому складу")
+        }
+        return response
     }
 
     private fun toResponse(
@@ -198,6 +214,8 @@ class ReservationService(
             sku = reservation.product.sku,
             productName = reservation.product.name,
             locationId = reservation.locationId,
+            warehouseId = locationRepository.findWarehouseIdByIdAndTenantId(reservation.locationId, reservation.tenantId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Ячейка не найдена"),
             quantity = reservation.quantity,
             status = reservation.status,
             referenceType = reservation.referenceType,
@@ -205,4 +223,17 @@ class ReservationService(
             createdAt = reservation.createdAt,
             releasedAt = reservation.releasedAt
         )
+
+    private fun requireReservationWarehouseAccess(
+        tenantId: Long,
+        locationId: Long,
+        allowedWarehouseIds: Set<Long>?
+    ) {
+        if (allowedWarehouseIds == null) return
+        val warehouseId = locationRepository.findWarehouseIdByIdAndTenantId(locationId, tenantId)
+            ?: throw ResponseStatusException(HttpStatus.CONFLICT, "Не найдена ячейка резерва")
+        if (warehouseId !in allowedWarehouseIds) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Нет доступа к этому складу")
+        }
+    }
 }

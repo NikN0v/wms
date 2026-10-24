@@ -20,18 +20,21 @@ class InventoryMovementService(
 ) {
 
     @Transactional(readOnly = true)
-    fun getAll(tenantId: Long): List<InventoryMovementResponse> {
+    fun getAll(tenantId: Long, warehouseIds: Set<Long>? = null): List<InventoryMovementResponse> {
         validateTenant(tenantId)
 
-        return movementRepository
+        if (warehouseIds != null && warehouseIds.isEmpty()) return emptyList()
+        val result = movementRepository
             .findAllByTenantIdOrderByCreatedAtDesc(tenantId)
             .map { it.toResponse() }
+        return if (warehouseIds == null) result else result.filter { it.warehouseId in warehouseIds }
     }
 
     @Transactional(readOnly = true)
     fun getByProduct(
         tenantId: Long,
-        productId: Long
+        productId: Long,
+        warehouseIds: Set<Long>? = null
     ): List<InventoryMovementResponse> {
         validateTenant(tenantId)
 
@@ -45,15 +48,18 @@ class InventoryMovementService(
             )
         }
 
-        return movementRepository
+        if (warehouseIds != null && warehouseIds.isEmpty()) return emptyList()
+        val result = movementRepository
             .findAllByTenantIdAndProduct_IdOrderByCreatedAtDesc(tenantId, productId)
             .map { it.toResponse() }
+        return if (warehouseIds == null) result else result.filter { it.warehouseId in warehouseIds }
     }
 
     @Transactional(readOnly = true)
     fun getByLocation(
         tenantId: Long,
-        locationId: Long
+        locationId: Long,
+        warehouseIds: Set<Long>? = null
     ): List<InventoryMovementResponse> {
         validateTenant(tenantId)
 
@@ -65,6 +71,10 @@ class InventoryMovementService(
                 HttpStatus.BAD_REQUEST,
                 "Ячейка не принадлежит указанной компании"
             )
+        }
+
+        if (warehouseIds != null && location.zone.warehouse.id !in warehouseIds) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Нет доступа к этому складу")
         }
 
         return movementRepository
@@ -93,6 +103,7 @@ class InventoryMovementService(
             productName =  product.name,
             locationId = locationId,
             locationCode = location.code,
+            warehouseId = requireNotNull(location.zone.warehouse.id),
             movementType = movementType,
             quantity = quantity,
             receivingDocumentId = receivingDocumentId,

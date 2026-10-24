@@ -3,6 +3,8 @@ package com.wms.controller.warehouse
 import com.wms.dto.warehouse.CreateWarehouseRequest
 import com.wms.dto.warehouse.WarehouseResponse
 import com.wms.service.warehouse.WarehouseService
+import com.wms.service.warehouse.WarehouseAccessService
+import com.wms.entity.user.UserRole
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
@@ -12,7 +14,8 @@ import org.springframework.web.server.ResponseStatusException
 @RestController
 @RequestMapping("/api/tenants/{tenantId}/warehouses")
 class WarehouseController(
-    private val warehouseService: WarehouseService
+    private val warehouseService: WarehouseService,
+    private val warehouseAccessService: WarehouseAccessService
 ) {
 
     @PostMapping
@@ -41,7 +44,16 @@ class WarehouseController(
     ): List<WarehouseResponse> {
         requireTenantAccess(tenantId, authentication)
 
-        return warehouseService.getAllByTenantId(tenantId)
+        val warehouses = warehouseService.getAllByTenantId(tenantId)
+        val userId = authentication.token.claims["userId"]?.toString()?.toLongOrNull()
+            ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "В токене отсутствует корректный ID пользователя")
+        val role = authentication.token.claims["role"]?.toString()?.let {
+            runCatching { UserRole.valueOf(it) }.getOrNull()
+        } ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "В токене отсутствует корректная роль")
+        return if (role == UserRole.OPERATOR) {
+            val assignedIds = warehouseAccessService.getAssignedWarehouseIds(tenantId, userId).toSet()
+            warehouses.filter { it.id in assignedIds }
+        } else warehouses
     }
 
     private fun requireTenantAccess(

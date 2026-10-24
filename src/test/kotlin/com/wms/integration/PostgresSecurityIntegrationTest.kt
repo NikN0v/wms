@@ -21,7 +21,9 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -223,6 +225,211 @@ class PostgresSecurityIntegrationTest {
         ).andExpect(status().isForbidden)
     }
 
+    @Test
+    fun `manager cannot change activation of another manager`() {
+        val actorId = insertUser(tenantId, "integration.manager.actor", "MANAGER")
+        val targetId = insertUser(tenantId, "integration.manager.target", "MANAGER")
+        val token = token(actorId, tenantId, "MANAGER")
+
+        mockMvc.perform(
+            patch("/api/tenants/$tenantId/users/$targetId/active")
+                .header("Authorization", "Bearer $token")
+                .contentType("application/json")
+                .content("{\"active\":false}")
+        ).andExpect(status().isForbidden)
+
+        assertEquals(true, jdbcTemplate.queryForObject("SELECT is_active FROM users WHERE id = ?", Boolean::class.java, targetId))
+    }
+
+    @Test
+    fun `user cannot change own activation or role and last admin remains active`() {
+        val adminId = insertUser(tenantId, "integration.admin", "ADMIN")
+        val token = token(adminId, tenantId, "ADMIN")
+
+        mockMvc.perform(
+            patch("/api/tenants/$tenantId/users/$adminId/active")
+                .header("Authorization", "Bearer $token")
+                .contentType("application/json")
+                .content("{\"active\":false}")
+        ).andExpect(status().isConflict)
+
+        mockMvc.perform(
+            patch("/api/tenants/$tenantId/users/$adminId/role")
+                .header("Authorization", "Bearer $token")
+                .contentType("application/json")
+                .content("{\"role\":\"MANAGER\"}")
+        ).andExpect(status().isConflict)
+
+        assertEquals("ADMIN", jdbcTemplate.queryForObject("SELECT role FROM users WHERE id = ?", String::class.java, adminId))
+        assertEquals(true, jdbcTemplate.queryForObject("SELECT is_active FROM users WHERE id = ?", Boolean::class.java, adminId))
+    }
+
+    @Test
+    fun `PATCH user operations reject another tenant`() {
+        val adminId = insertUser(tenantId, "integration.admin", "ADMIN")
+        jdbcTemplate.update(
+            "INSERT INTO tenants (name, code) VALUES ('Other Integration Tenant', 'CODEX_OTHER_TEST') ON CONFLICT (code) DO NOTHING"
+        )
+        val otherTenantId = jdbcTemplate.queryForObject(
+            "SELECT id FROM tenants WHERE code = 'CODEX_OTHER_TEST'", Long::class.java
+        )!!
+        val otherUserId = insertUser(otherTenantId, "other.tenant.user", "OPERATOR")
+        val token = token(adminId, tenantId, "ADMIN")
+
+        mockMvc.perform(
+            patch("/api/tenants/$otherTenantId/users/$otherUserId/active")
+                .header("Authorization", "Bearer $token")
+                .contentType("application/json")
+                .content("{\"active\":false}")
+        ).andExpect(status().isForbidden)
+
+        mockMvc.perform(
+            patch("/api/tenants/$otherTenantId/users/$otherUserId/role")
+                .header("Authorization", "Bearer $token")
+                .contentType("application/json")
+                .content("{\"role\":\"MANAGER\"}")
+        ).andExpect(status().isForbidden)
+
+        assertEquals("OPERATOR", jdbcTemplate.queryForObject("SELECT role FROM users WHERE id = ?", String::class.java, otherUserId))
+        assertEquals(true, jdbcTemplate.queryForObject("SELECT is_active FROM users WHERE id = ?", Boolean::class.java, otherUserId))
+    }
+
+    @Test
+    fun `operator sees and accesses only assigned warehouses`() {
+        val adminId = insertUser(tenantId, "integration.admin", "ADMIN")
+        val operatorId = insertUser(tenantId, "integration.operator", "OPERATOR")
+        val assignedWarehouseId = insertWarehouse(tenantId, "ASSIGNED")
+        val otherWarehouseId = insertWarehouse(tenantId, "UNASSIGNED")
+        val adminToken = token(adminId, tenantId, "ADMIN")
+        val operatorToken = token(operatorId, tenantId, "OPERATOR")
+
+        mockMvc.perform(
+            put("/api/tenants/$tenantId/users/$operatorId/warehouses")
+                .header("Authorization", "Bearer $adminToken")
+                .contentType("application/json")
+                .content("{\"warehouseIds\":[$assignedWarehouseId]}")
+        ).andExpect(status().isOk)
+
+        mockMvc.perform(
+            get("/api/tenants/$tenantId/users/$operatorId/warehouses")
+                .header("Authorization", "Bearer $adminToken")
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$[0]").value(assignedWarehouseId))
+
+        mockMvc.perform(
+            get("/api/tenants/$tenantId/warehouses")
+                .header("Authorization", "Bearer $operatorToken")
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].id").value(assignedWarehouseId))
+
+        mockMvc.perform(
+            get("/api/tenants/$tenantId/warehouses/$assignedWarehouseId/zones")
+                .header("Authorization", "Bearer $operatorToken")
+        ).andExpect(status().isOk)
+
+        mockMvc.perform(
+            get("/api/tenants/$tenantId/warehouses/$otherWarehouseId/zones")
+                .header("Authorization", "Bearer $operatorToken")
+        ).andExpect(status().isForbidden)
+
+        mockMvc.perform(
+            patch("/api/tenants/$tenantId/users/$operatorId/role")
+                .header("Authorization", "Bearer $adminToken")
+                .contentType("application/json")
+                .content("{\"role\":\"MANAGER\"}")
+        ).andExpect(status().isOk)
+
+        mockMvc.perform(
+            get("/api/tenants/$tenantId/warehouses/$assignedWarehouseId/zones")
+                .header("Authorization", "Bearer $operatorToken")
+        ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `cannot assign a warehouse from another tenant`() {
+        val adminId = insertUser(tenantId, "integration.admin", "ADMIN")
+        val operatorId = insertUser(tenantId, "integration.operator", "OPERATOR")
+        jdbcTemplate.update(
+            "INSERT INTO tenants (name, code) VALUES ('Other Integration Tenant', 'CODEX_OTHER_TEST') ON CONFLICT (code) DO NOTHING"
+        )
+        val otherTenantId = jdbcTemplate.queryForObject(
+            "SELECT id FROM tenants WHERE code = 'CODEX_OTHER_TEST'", Long::class.java
+        )!!
+        val foreignWarehouseId = insertWarehouse(otherTenantId, "FOREIGN")
+        val adminToken = token(adminId, tenantId, "ADMIN")
+
+        mockMvc.perform(
+            put("/api/tenants/$tenantId/users/$operatorId/warehouses")
+                .header("Authorization", "Bearer $adminToken")
+                .contentType("application/json")
+                .content("{\"warehouseIds\":[$foreignWarehouseId]}")
+        ).andExpect(status().isBadRequest)
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM user_warehouse_assignments WHERE tenant_id = ? AND user_id = ?",
+            Int::class.java,
+            tenantId,
+            operatorId
+        ))
+    }
+
+    @Test
+    fun `operator tenant-level stock APIs return only assigned warehouse data`() {
+        val adminId = insertUser(tenantId, "integration.admin", "ADMIN")
+        val operatorId = insertUser(tenantId, "integration.operator", "OPERATOR")
+        val assignedWarehouseId = insertWarehouse(tenantId, "STOCK_ASSIGNED")
+        val otherWarehouseId = insertWarehouse(tenantId, "STOCK_OTHER")
+        val assignedLocationId = insertLocation(tenantId, assignedWarehouseId, "A-01")
+        val otherLocationId = insertLocation(tenantId, otherWarehouseId, "B-01")
+        val productId = jdbcTemplate.queryForObject(
+            "INSERT INTO products (tenant_id, sku, name) VALUES (?, ?, 'Test Product') RETURNING id",
+            Long::class.java,
+            tenantId,
+            "T${System.nanoTime()}"
+        )!!
+        listOf(assignedLocationId, otherLocationId).forEach { locationId ->
+            jdbcTemplate.update(
+                "INSERT INTO inventory (tenant_id, product_id, location_id, quantity) VALUES (?, ?, ?, 10)",
+                tenantId,
+                productId,
+                locationId
+            )
+            jdbcTemplate.update(
+                "INSERT INTO inventory_movements (tenant_id, product_id, location_id, movement_type, quantity) VALUES (?, ?, ?, 'ADJUSTMENT', 1)",
+                tenantId,
+                productId,
+                locationId
+            )
+            jdbcTemplate.update(
+                "INSERT INTO stock_reservations (tenant_id, product_id, location_id, quantity) VALUES (?, ?, ?, 1)",
+                tenantId,
+                productId,
+                locationId
+            )
+        }
+        mockMvc.perform(
+            put("/api/tenants/$tenantId/users/$operatorId/warehouses")
+                .header("Authorization", "Bearer ${token(adminId, tenantId, "ADMIN")}")
+                .contentType("application/json")
+                .content("{\"warehouseIds\":[$assignedWarehouseId]}")
+        ).andExpect(status().isOk)
+        val operatorToken = token(operatorId, tenantId, "OPERATOR")
+
+        mockMvc.perform(get("/api/tenants/$tenantId/inventory").header("Authorization", "Bearer $operatorToken"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].locationId").value(assignedLocationId))
+        mockMvc.perform(get("/api/tenants/$tenantId/inventory-movements").header("Authorization", "Bearer $operatorToken"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].warehouseId").value(assignedWarehouseId))
+        mockMvc.perform(get("/api/tenants/$tenantId/reservations").header("Authorization", "Bearer $operatorToken"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].warehouseId").value(assignedWarehouseId))
+    }
+
     private fun insertUser(tenantId: Long, username: String, role: String): Long =
         jdbcTemplate.queryForObject(
             "INSERT INTO users (tenant_id, username, password_hash, role, is_active) VALUES (?, ?, 'test-hash', ?, true) RETURNING id",
@@ -231,6 +438,32 @@ class PostgresSecurityIntegrationTest {
             username,
             role
         )!!
+
+    private fun insertWarehouse(tenantId: Long, suffix: String): Long =
+        jdbcTemplate.queryForObject(
+            "INSERT INTO warehouses (tenant_id, name, code) VALUES (?, ?, ?) RETURNING id",
+            Long::class.java,
+            tenantId,
+            "Integration $suffix",
+            "T${System.nanoTime()}"
+        )!!
+
+    private fun insertLocation(tenantId: Long, warehouseId: Long, code: String): Long {
+        val zoneId = jdbcTemplate.queryForObject(
+            "INSERT INTO storage_zones (tenant_id, warehouse_id, name, code) VALUES (?, ?, 'Test Zone', ?) RETURNING id",
+            Long::class.java,
+            tenantId,
+            warehouseId,
+            "Z${System.nanoTime()}"
+        )!!
+        return jdbcTemplate.queryForObject(
+            "INSERT INTO storage_locations (tenant_id, zone_id, code) VALUES (?, ?, ?) RETURNING id",
+            Long::class.java,
+            tenantId,
+            zoneId,
+            code
+        )!!
+    }
 
     private fun token(userId: Long, tenantId: Long, role: String): String {
         val now = Instant.now()

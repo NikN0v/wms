@@ -16,6 +16,8 @@ interface UserRepository : JpaRepository<User, Long> {
         username: String
     ): Optional<User>
 
+    fun findByIdAndTenantId(id: Long, tenantId: Long): Optional<User>
+
     fun existsByTenantIdAndUsername(
         tenantId: Long,
         username: String
