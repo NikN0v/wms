@@ -3,6 +3,7 @@ package com.wms.service.user
 import com.wms.dto.user.LoginRequest
 import com.wms.dto.user.LoginResponse
 import com.wms.repository.user.UserRepository
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm
@@ -16,8 +17,16 @@ import java.time.Instant
 class AuthService(
     private val userRepository: UserRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val jwtEncoder: JwtEncoder
+    private val jwtEncoder: JwtEncoder,
+    @Value("\${security.jwt.expiration-seconds}")
+    private val jwtExpirationSeconds: Long
 ) {
+
+    init {
+        require(jwtExpirationSeconds > 0) {
+            "Срок действия JWT должен быть положительным"
+        }
+    }
 
     fun login(request: LoginRequest): LoginResponse {
         val username = request.username.trim().lowercase()
@@ -33,7 +42,7 @@ class AuthService(
         }
 
         val now = Instant.now()
-        val expiresIn = 3600L
+        val expiresIn = jwtExpirationSeconds
 
         val claims = JwtClaimsSet.builder()
             .issuer("wms-api")

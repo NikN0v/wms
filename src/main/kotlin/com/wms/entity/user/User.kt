@@ -29,7 +29,7 @@ class User(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
-    val role: UserRole,
+    var role: UserRole,
 
     @Column(name = "is_active", nullable = false)
     var isActive: Boolean = true,

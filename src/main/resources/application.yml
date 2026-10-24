@@ -23,6 +23,8 @@ security:
   jwt:
     secret: ${WMS_JWT_SECRET_BASE64}
     expiration-seconds: 3600
+  bootstrap:
+    secret: ${WMS_BOOTSTRAP_SECRET:}
 
 server:
   port: 8080
