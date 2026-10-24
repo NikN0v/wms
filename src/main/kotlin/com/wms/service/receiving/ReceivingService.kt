@@ -18,6 +18,7 @@ import com.wms.repository.receiving.ReceivingDocumentLineRepository
 import com.wms.repository.receiving.ReceivingDocumentRepository
 import com.wms.repository.tenant.TenantRepository
 import com.wms.repository.warehouse.WarehouseRepository
+import com.wms.service.audit.AuditLogService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -33,7 +34,8 @@ class ReceivingService(
     private val documentRepository: ReceivingDocumentRepository,
     private val lineRepository: ReceivingDocumentLineRepository,
     private val inventoryRepository: InventoryRepository,
-    private val movementRepository: InventoryMovementRepository
+    private val movementRepository: InventoryMovementRepository,
+    private val auditLogService: AuditLogService
 ) {
 
     @Transactional
@@ -197,6 +199,17 @@ class ReceivingService(
 
         document.status = ReceivingDocumentStatus.POSTED
         document.postedAt = OffsetDateTime.now()
+
+        auditLogService.log(
+            tenantId = tenantId,
+            action = "RECEIPT_POSTED",
+            entityType = "RECEIVING",
+            entityId = document.id,
+            details = mapOf(
+                "documentNumber" to document.documentNumber,
+                "linesCount" to lines.size
+            )
+        )
 
         return documentRepository.save(document).toResponse()
     }

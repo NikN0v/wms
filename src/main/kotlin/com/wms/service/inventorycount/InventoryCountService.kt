@@ -12,6 +12,7 @@ import com.wms.repository.location.StorageLocationRepository
 import com.wms.repository.movement.InventoryMovementRepository
 import com.wms.repository.product.ProductRepository
 import com.wms.repository.warehouse.WarehouseRepository
+import com.wms.service.audit.AuditLogService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -27,7 +28,8 @@ class InventoryCountService(
     private val productRepository: ProductRepository,
     private val locationRepository: StorageLocationRepository,
     private val inventoryRepository: InventoryRepository,
-    private val inventoryMovementRepository: InventoryMovementRepository
+    private val inventoryMovementRepository: InventoryMovementRepository,
+    private val auditLogService: AuditLogService
 ) {
 
     @Transactional
@@ -171,7 +173,25 @@ class InventoryCountService(
 
         document.status = InventoryCountStatus.POSTED
         document.postedAt = now
+
         countRepository.save(document)
+
+        val adjustedLinesCount = inventories.count { (line, _, inventory) ->
+            line.actualQuantity.compareTo(inventory.quantity) != 0
+        }
+
+        auditLogService.log(
+            tenantId = tenantId,
+            action = "INVENTORY_COUNT_POSTED",
+            entityType = "INVENTORY_COUNT",
+            entityId = document.id,
+            details = mapOf(
+                "documentNumber" to document.documentNumber,
+                "linesCount" to lines.size,
+                "adjustedLinesCount" to adjustedLinesCount,
+                "status" to document.status.name
+            )
+        )
 
         return toResponse(document)
     }
