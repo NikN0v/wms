@@ -5,13 +5,8 @@ import com.wms.dto.warehouse.WarehouseResponse
 import com.wms.service.warehouse.WarehouseService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.ResponseStatus
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
+import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 
 @RestController
@@ -24,8 +19,11 @@ class WarehouseController(
     @ResponseStatus(HttpStatus.CREATED)
     fun create(
         @PathVariable tenantId: Long,
-        @Valid @RequestBody request: CreateWarehouseRequest
+        @Valid @RequestBody request: CreateWarehouseRequest,
+        authentication: JwtAuthenticationToken
     ): WarehouseResponse {
+        requireTenantAccess(tenantId, authentication)
+
         if (tenantId != request.tenantId) {
             throw ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
@@ -38,8 +36,31 @@ class WarehouseController(
 
     @GetMapping
     fun getAll(
-        @PathVariable tenantId: Long
+        @PathVariable tenantId: Long,
+        authentication: JwtAuthenticationToken
     ): List<WarehouseResponse> {
+        requireTenantAccess(tenantId, authentication)
+
         return warehouseService.getAllByTenantId(tenantId)
+    }
+
+    private fun requireTenantAccess(
+        tenantId: Long,
+        authentication: JwtAuthenticationToken
+    ) {
+        val tokenTenantId = authentication.token.claims["tenantId"]
+            ?.toString()
+            ?.toLongOrNull()
+            ?: throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "В токене отсутствует корректный ID компании"
+            )
+
+        if (tenantId != tokenTenantId) {
+            throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "Нет доступа к данным этой компании"
+            )
+        }
     }
 }
