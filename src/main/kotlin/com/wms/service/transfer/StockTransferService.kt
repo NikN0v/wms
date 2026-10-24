@@ -18,6 +18,7 @@ import com.wms.repository.tenant.TenantRepository
 import com.wms.repository.transfer.StockTransferLineRepository
 import com.wms.repository.transfer.StockTransferRepository
 import com.wms.repository.warehouse.WarehouseRepository
+import com.wms.service.audit.AuditLogService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -34,7 +35,8 @@ class StockTransferService(
     private val lineRepository: StockTransferLineRepository,
     private val inventoryRepository: InventoryRepository,
     private val movementRepository: InventoryMovementRepository,
-    private val stockTransferRepository: StockTransferRepository
+    private val stockTransferRepository: StockTransferRepository,
+    private val auditLogService: AuditLogService
 ) {
 
     @Transactional
@@ -268,6 +270,18 @@ class StockTransferService(
         document.postedAt = OffsetDateTime.now()
 
         transferRepository.save(document)
+
+        auditLogService.log(
+            tenantId = tenantId,
+            action = "STOCK_TRANSFER_POSTED",
+            entityType = "STOCK_TRANSFER",
+            entityId = document.id,
+            details = mapOf(
+                "documentNumber" to document.documentNumber,
+                "linesCount" to lines.size,
+                "status" to document.status.name
+            )
+        )
 
         return document.toResponse()
     }

@@ -19,6 +19,7 @@ import com.wms.repository.reservation.StockReservationRepository
 import com.wms.repository.shipment.ShipmentLineRepository
 import com.wms.repository.shipment.ShipmentRepository
 import com.wms.repository.warehouse.WarehouseRepository
+import com.wms.service.audit.AuditLogService
 import jakarta.transaction.Transactional
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -34,7 +35,8 @@ class ShipmentService(
     private val locationRepository: StorageLocationRepository,
     private val inventoryRepository: InventoryRepository,
     private val movementRepository: InventoryMovementRepository,
-    private val reservationRepository: StockReservationRepository
+    private val reservationRepository: StockReservationRepository,
+    private val auditLogService: AuditLogService
 ) {
 
     @Transactional
@@ -338,6 +340,19 @@ class ShipmentService(
         document.postedAt = OffsetDateTime.now()
 
         shipmentRepository.save(document)
+
+        auditLogService.log(
+            tenantId = tenantId,
+            action = "SHIPMENT_POSTED",
+            entityType = "SHIPMENT",
+            entityId = document.id,
+            details = mapOf(
+                "documentNumber" to document.documentNumber,
+                "linesCount" to lines.size,
+                "status" to document.status.name,
+                "reservationsUsed" to lines.count { it.reservationId != null }
+            )
+        )
 
         return toResponse(document)
     }

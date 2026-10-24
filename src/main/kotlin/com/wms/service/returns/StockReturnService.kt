@@ -17,6 +17,7 @@ import com.wms.repository.product.ProductRepository
 import com.wms.repository.returns.StockReturnLineRepository
 import com.wms.repository.returns.StockReturnRepository
 import com.wms.repository.warehouse.WarehouseRepository
+import com.wms.service.audit.AuditLogService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -32,7 +33,8 @@ class StockReturnService(
     private val productRepository: ProductRepository,
     private val locationRepository: StorageLocationRepository,
     private val inventoryRepository: InventoryRepository,
-    private val inventoryMovementRepository: InventoryMovementRepository
+    private val inventoryMovementRepository: InventoryMovementRepository,
+    private val auditLogService: AuditLogService
 ) {
 
     @Transactional
@@ -173,6 +175,18 @@ class StockReturnService(
         document.postedAt = OffsetDateTime.now()
 
         returnRepository.save(document)
+
+        auditLogService.log(
+            tenantId = tenantId,
+            action = "STOCK_RETURN_POSTED",
+            entityType = "STOCK_RETURN",
+            entityId = document.id,
+            details = mapOf(
+                "documentNumber" to document.documentNumber,
+                "linesCount" to lines.size,
+                "status" to document.status.name
+            )
+        )
 
         return toResponse(document)
     }
